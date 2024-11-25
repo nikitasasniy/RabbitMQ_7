@@ -16,24 +16,40 @@ async def get_internal_links(url, base_url):
             links = []
             for a_tag in soup.find_all('a', href=True):
                 href = a_tag['href']
+                # Если ссылка абсолютная, добавляем ее как есть
                 if href.startswith('http') or href.startswith('https'):
                     if base_url in href:
                         links.append(href)
+                # Если ссылка относительная, делаем ее абсолютной
                 else:
-                    links.append(urljoin(base_url, href))
+                    full_url = urljoin(url, href)
+                    links.append(full_url)
             return links
 
 
 # Функция для подключения к RabbitMQ и отправки ссылок
 def send_to_queue(links, queue_name):
+    # Подключение к RabbitMQ
     connection = pika.BlockingConnection(pika.ConnectionParameters(host=os.getenv('RABBITMQ_HOST', 'localhost')))
     channel = connection.channel()
-    channel.queue_declare(queue=queue_name)
 
+    # Декларация очереди с параметром durable=True
+    # Это гарантирует, что очередь будет существовать после перезапуска RabbitMQ
+    channel.queue_declare(queue=queue_name, durable=True)
+
+    # Отправка сообщений в очередь
     for link in links:
-        channel.basic_publish(exchange='', routing_key=queue_name, body=link)
+        channel.basic_publish(
+            exchange='',
+            routing_key=queue_name,
+            body=link,
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # Сделать сообщение стойким (persistent)
+            )
+        )
         print(f"Sent: {link}")
 
+    # Закрытие соединения
     connection.close()
 
 
@@ -47,10 +63,12 @@ async def main():
 
     print(f"Processing {url}")
 
+    # Получаем все внутренние ссылки
     links = await get_internal_links(url, base_url)
 
     print(f"Found {len(links)} internal links")
 
+    # Отправляем ссылки в очередь RabbitMQ
     send_to_queue(links, 'urls')
 
 
