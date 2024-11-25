@@ -85,7 +85,7 @@ async def get_internal_links(url, base_url, processed_urls):
             return []
 
 
-async def process_message(message: aio_pika.IncomingMessage, exchange, processed_urls):
+async def process_message(message: aio_pika.IncomingMessage, exchange, processed_urls, stop_event):
     async with message.process():
         url = message.body.decode()
         base_url = urlparse(url).netloc
@@ -103,6 +103,9 @@ async def process_message(message: aio_pika.IncomingMessage, exchange, processed
                 logger.info(f"Добавлена в очередь ссылка: {link['url']}")
             except Exception as e:
                 logger.error(f"Ошибка при добавлении ссылки {link['url']}: {e}")
+
+        # Сбрасываем таймер (если сообщение пришло)
+        stop_event.set()
 
 
 # Асинхронная функция для подключения и обработки очереди RabbitMQ
@@ -124,11 +127,36 @@ async def consume():
         queue = await channel.declare_queue("urls", durable=True)
         await queue.bind(exchange, routing_key="urls")
 
-        # Начинаем потребление сообщений
-        await queue.consume(lambda message: process_message(message, exchange, processed_urls))
+        # Событие для завершения работы
+        stop_event = asyncio.Event()
 
+        # Таймер на 60 секунд без сообщений
+        async def check_empty_queue():
+            while True:
+                await asyncio.sleep(60)
+                if not stop_event.is_set():
+                    logger.info("Очередь пуста в течение 60 секунд. Завершаем работу.")
+                    await connection.close()  # Закрываем соединение и завершаем работу
+                    break
+                stop_event.clear()  # Сбрасываем событие, если пришло новое сообщение
+
+        # Запускаем проверку таймера в фоне
+        asyncio.create_task(check_empty_queue())
+
+        # Начинаем потребление сообщений
         logger.info("Ожидание сообщений...")
-        await asyncio.Future()  # Для непрерывной работы
+
+        while True:
+            try:
+                # Ожидаем новое сообщение
+                message = await queue.get()
+
+                if message:
+                    await process_message(message, exchange, processed_urls, stop_event)
+                    stop_event.set()  # Сбросим таймер, если пришло сообщение
+
+            except Exception as e:
+                pass
 
 
 if __name__ == "__main__":
