@@ -7,15 +7,15 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 import json
 
-# Настройка логирования
+# Настройка логирования для вывода в консоль
 logger = logging.getLogger('crawler')
 logger.setLevel(logging.INFO)
 
-file_handler = logging.FileHandler('crawler.log', encoding='utf-8')
-file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-file_handler.setFormatter(file_formatter)
+console_handler = logging.StreamHandler()
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
 
-logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 # Путь к файлу, где будут храниться обработанные ссылки
 processed_urls_file = 'processed_urls.json'
